@@ -1,0 +1,21 @@
+## We iterate and resolve the definitions, because whilst nftables can absolutely handle 'hostnames' it MIGHT NOT be able to when you first start nftables. 
+## but we don't want to 'hardcode' IPs either really, so this is the compromise. 
+
+{%for group in fw_groups%}
+define {{ group['name'] }} = {
+{%for host in group['group']%}
+   {%-set addr = lookup('dig', host)-%}
+   {%-if addr not in ['NXDOMAIN','SERVFAIL']%}
+     {{addr}}, # {{host}}
+{%endif%}
+{%endfor%}
+}
+{%endfor%}
+
+## create chain and counter for this rule create chain inet {{policy_name}} {{rule_name}} add counter inet {{policy_name}} {{rule_name}}
+
+## rule logic here
+{%for accept_rule in accept_rules%}
+add rule inet {{policy_name}} {{rule_name}} {{accept_rule}} counter name {{rule_name}} accept {%endfor%}
+
+## this bit tells the policy to actually use all of the above add rule inet {{policy_name}} included_rules jump {{rule_name}}
