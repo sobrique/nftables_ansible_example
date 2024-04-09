@@ -1,0 +1,12 @@
+
+## create chain and counter for this rule
+create chain inet my_firewall_policy_name role_webhost_cluster
+add counter inet my_firewall_policy_name role_webhost_cluster
+
+## rule logic here. 
+## $internal_hosts is defined in my environment in a general definitions file that all hosts get
+## from an ansible source, so the same names are consistent across the environment. 
+add rule inet my_firewall_policy_name role_webhost_cluster tcp dport { http, https } ip saddr $internal_hosts counter name role_webhost_cluster accept
+
+## this bit tells the policy to actually use all of the above by inserting it into our empty 'main.nft' chain. 
+add rule inet my_firewall_policy_name included_rules jump role_webhost_cluster
