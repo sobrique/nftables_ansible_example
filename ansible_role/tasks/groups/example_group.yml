@@ -1,0 +1,13 @@
+## Example of a 'group definition' file called 'example_group' - defined by the ansible 'hosts' file as membership.
+## In the below, all members of 'example group' are permitted to connect on ports 9300 and 9500
+
+---
+
+- name: Example Group
+  template:
+    src: group_access_rule.nft.j2
+    dest: "{{ rule_file_path }}"
+  vars:
+    accept_rules:
+      - "tcp dport { 9300, 9500 }"
+    allowed_hosts: "{{ groups['example_group'] }}"
