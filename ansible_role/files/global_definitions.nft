@@ -1,0 +1,7 @@
+## File with some basic definitions applicable to all hosts to use in future rules, because
+## it's often clearer to use macros in templates than numeric values. 
+
+define local_site_hosts = 10.0.0.0/8
+
+define admin_hosts = 10.99.99.0/24
+define user_hosts = 10.10.10.0/24
