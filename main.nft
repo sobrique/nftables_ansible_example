@@ -1,0 +1,70 @@
+# Load this by calling 'nft -f /etc/nftables/main.nft'.
+
+# drop any existing nftables ruleset
+flush ruleset
+
+# a common table for both IPv4 and IPv6
+table inet my_firewall_policy_name {
+
+
+  # NB: Allow list is OR logic
+	# protocols to allow
+	set allowed_protocols {
+		type inet_proto
+		elements = { icmp, icmpv6 }
+	}
+
+	# interfaces to accept any traffic on
+	set allowed_interfaces {
+		type ifname
+		elements = { "lo" }
+	}
+
+	# this chain gathers all accept conditions
+	chain allow_general {
+		ct state established,related accept
+		meta l4proto @allowed_protocols accept
+		iifname @allowed_interfaces accept
+	}
+
+  # place to insert new rules
+  chain included_rules {
+
+ }
+
+ #Chain to add drop/reject rules
+ #to happen after any includes.
+ #Goal is noise filtering so the 'default' reject and log
+ #can be replaced with 'reject silently'. 
+ chain drop_rules {
+
+ }
+
+	# base-chain for traffic to this host
+	chain INPUT {
+		type filter hook input priority filter + 20 
+		policy accept
+
+    ## Inbuild allow rules to e.g. lo0
+		jump allow_general
+    ## Empty chain by default, that we populate with include files. 
+    jump included_rules
+    ## Likewise, but drops traffic from included files (and doesn't log for e.g. broadcasts)
+    jump drop_rules
+
+    # Catch everything that hasn't applied - log it. 
+		log prefix "NFT_REJECT: " reject with icmpx type port-unreachable
+	}
+}
+
+## the 'include_file' list is built up explicity using ansible. 
+#include rules, rather than wildcards 
+#this is so 'orphan' rule files don't get processed accidentally. Ansible is not so good at removing 'everything that shouldn't be there' in general. 
+# there's no real reason you shouldn't do "/etc/nftables/included_files/*.nft" aside from that though. 
+#
+
+include "/etc/nftables/include_rules/global_definitions.nft"
+include "/etc/nftables/include_rules/ssh_access.nft"
+include "/etc/nftables/include_rules/nolog_drop.nft"
+include "/etc/nftables/include_rules/role_nfs_client.nft"
+include "/etc/nftables/include_rules/group_desktop.nft"
