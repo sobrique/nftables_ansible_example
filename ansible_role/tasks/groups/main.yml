@@ -1,0 +1,37 @@
+---
+
+- name: check firewall rules for {{ item }}
+  ansible.builtin.stat:
+    path: "{{ role_path }}/tasks/groups/{{ item }}.yml"
+  delegate_to: localhost
+  register: file
+
+- name: Set location to install this rule
+  set_fact: 
+    rule_file_path: "/etc/nftables/{{ policy_name }}/group_{{ item }}.nft"
+
+- block: 
+  - name: include firewall rules for {{ item }}
+    ansible.builtin.include_tasks: "{{ role_path }}/tasks/groups/{{ item }}.yml"
+    vars:
+      rule_name: group_{{ item }}
+
+  - name: check if an appropriate file exists 
+    ansible.builtin.stat:
+      ## should be the same as rule_file_path above
+      path: "{{ rule_file_path }}"
+    register:
+      nft_file
+
+  - name: Add this file to the list to include
+    set_fact:
+      files_to_include: "{{ files_to_include + [nft_file.stat.path] }}"
+    when: nft_file.stat.exists
+
+  #block
+  when: 
+    - file.stat.exists
+
+- debug:
+    var:
+      files_to_include
