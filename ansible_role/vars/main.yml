@@ -1,0 +1,3 @@
+## Defined here to maybe one day support multiple policies for different 'zones'. 
+
+policy_name: my_nftables_policy
