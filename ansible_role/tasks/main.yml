@@ -71,36 +71,6 @@
     files_to_include: "{{ files_to_include + [drop_nolog_inc_results['dest']] }}"
   when: not ansible_check_mode
 
-- name: include nftables rules for host {{ inventory_hostname }}
-  ansible.builtin.stat:
-    path: "{{ role_path }}/tasks/hosts/{{ inventory_hostname }}.nft"
-  delegate_to: localhost
-  register: file
-
-- block: # testing existence of host file
-
-  - name: Set path for host specific rules
-    set_fact:
-      rule_file_path: "/etc/nftables/{{ policy_name }}/host_{{ inventory_hostname }}"
-
-  - name: include nftables rules for host {{ inventory_hostname }}
-    ansible.builtin.include_tasks: "{{ role_path }}/tasks/hosts/{{ inventory_hostname }}.nft"
-    vars:
-      rule_name: "host_{{ inventory_hostname }}"
-
-  - name: check if an appropriate file exists 
-    ansible.builtin.stat:
-      ## should be the same as rule_file_path above
-      path: "{{ rule_file_path }}"
-    register:
-      nft_file
-
-  - name: Add this file to the list to include
-    set_fact:
-      files_to_include: "{{ files_to_include + [nft_file.stat.path] }}"
-  #end of block 'testing existence'
-  when: file.stat.exists
-
 - name: include nftables rules for roles
   ansible.builtin.include_tasks: roles/main.yml
   loop: "{{ ansible_role_names|sort }}"
