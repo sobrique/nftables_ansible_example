@@ -1,0 +1,174 @@
+---
+
+- name: init list of files to include in main policy template for {{policy_name}}
+  set_fact: 
+    files_to_include: []
+
+- name: Check/set perms on /etc/nftables
+  ansible.builtin.file:
+    path: /etc/nftables
+    state: directory
+    mode: u=rwx,og=rx
+    owner: root
+    group: root
+
+
+- name: create a dir for our custom rules for {{policy_name}}
+  ansible.builtin.file:
+    path: /etc/nftables/{{policy_name}}/
+    state: directory
+    mode: u=rwx,og=rx
+    owner: root
+    group: root
+
+- name: Set /etc/sysconfig/nftables.conf so it will load nftables config by default
+  ansible.builtin.copy:
+    src: nftables.conf
+    dest: /etc/sysconfig/nftables.conf
+  register: reload_nftables
+
+- name: add some general definitions for rules to use
+  ansible.builtin.copy:
+    src: global_definitions.nft
+    dest: /etc/nftables/{{policy_name}}/global_definitions.nft
+  register: general_defs
+  notify: reload_nftables
+
+- name: append results to include list
+  set_fact:
+    files_to_include: "{{ files_to_include + [general_defs['dest']] }}"
+  when: not ansible_check_mode
+
+- name: Add ssh access specific rule
+  ansible.builtin.template:
+    src: ssh_access.nft.j2
+    dest: /etc/nftables/{{policy_name}}/ssh_access.nft
+  vars:
+    rule_name: ssh_access
+  register: ssh_inc_results
+  notify: reload_nftables
+
+- name: append results to include list
+  set_fact:
+    files_to_include: "{{ files_to_include + [ssh_inc_results['dest']] }}"
+  when: not ansible_check_mode
+
+# note - applied _after_ all the included rules, so won't discard anything explicitly allowed. 
+- name: Add silent drop rules
+  ansible.builtin.template:
+    src: template_nolog_drop.nft.j2
+    dest: /etc/nftables/{{policy_name}}/nolog_drop.nft
+  vars:
+    rule_name: drop_nolog
+    drop_rules:
+      - ip daddr 224.0.0.0/8 # multicast
+      - ip daddr 255.255.255.255 # broadcast
+  register: drop_nolog_inc_results
+  notify: reload_nftables
+
+- name: append results to include list
+  set_fact:
+    files_to_include: "{{ files_to_include + [drop_nolog_inc_results['dest']] }}"
+  when: not ansible_check_mode
+
+- name: include nftables rules for host {{ inventory_hostname }}
+  ansible.builtin.stat:
+    path: "{{ role_path }}/tasks/hosts/{{ inventory_hostname }}.nft"
+  delegate_to: localhost
+  register: file
+
+- block: # testing existence of host file
+
+  - name: Set path for host specific rules
+    set_fact:
+      rule_file_path: "/etc/nftables/{{ policy_name }}/host_{{ inventory_hostname }}"
+
+  - name: include nftables rules for host {{ inventory_hostname }}
+    ansible.builtin.include_tasks: "{{ role_path }}/tasks/hosts/{{ inventory_hostname }}.nft"
+    vars:
+      rule_name: "host_{{ inventory_hostname }}"
+
+  - name: check if an appropriate file exists 
+    ansible.builtin.stat:
+      ## should be the same as rule_file_path above
+      path: "{{ rule_file_path }}"
+    register:
+      nft_file
+
+  - name: Add this file to the list to include
+    set_fact:
+      files_to_include: "{{ files_to_include + [nft_file.stat.path] }}"
+  #end of block 'testing existence'
+  when: file.stat.exists
+
+- name: include nftables rules for roles
+  ansible.builtin.include_tasks: roles/main.yml
+  loop: "{{ ansible_role_names|sort }}"
+
+- name: FORCE include rules defined in extra_roles for testing
+  ansible.builtin.include_tasks: roles/main.yml
+  loop: "{{ extra_nft_roles|default([]) }}"
+
+- name: include nftables rules for groups
+  ansible.builtin.include_tasks: groups/main.yml
+  loop: "{{ group_names|sort }}"
+
+- name: FORCE include nftables rules for groups for testing. 
+  ansible.builtin.include_tasks: groups/main.yml
+  loop: "{{ extra_nft_groups|default([]) }}"
+
+
+- name: List included files in main.nft
+  debug:
+    var: 
+      files_to_include
+
+# Now we test the file directory to see if there's any recent modifications.
+# We use this as a trigger to reload our nft, because that way we don't need to have # 'notify' in every relevant subtask.
+
+- name: Check for recent modifications to the 'nftables' directory, and use that to trigger a reload
+  ansible.builtin.find:
+    paths: "/etc/nftables/"
+    recurse: yes
+    age: -10m
+  register: modified_files
+  changed_when: "modified_files.matched > 0"
+  notify: reload_nftables
+
+- name: Number of files changed in /etc/nftables
+  debug:
+    var: modified_files.files | map(attribute='path') 
+
+- set_fact:
+    nft_rule_path: "/etc/nftables/main.nft"
+
+- name: Apply /etc/nftables/main.nft template
+  template:
+    src: main.nft.j2
+    dest: "{{nft_rule_path}}"
+    mode: "u=rw,og=r"
+  notify: reload_nftables
+  when:
+    - not ansible_check_mode
+
+- name: validate nft config
+  ansible.builtin.command: "nft --check --file {{nft_rule_path}}"
+  changed_when: false
+
+- name: disable firewalld
+  ansible.builtin.systemd_service:
+    name: firewalld
+    masked: true
+    enabled: false
+    state: stopped
+  when: skip_reload is not defined or ( skip_reload is defined and not skip_reload )
+
+- name: enable nftables service
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: true
+    state: started
+  when: skip_reload is not defined or ( skip_reload is defined and not skip_reload )
+
+- meta: flush_handlers
+
