@@ -1,0 +1,9 @@
+---
+
+- name: Access rule for 'example' role
+  template:
+    src: simple_host_rule.nft.j2
+    dest: "{{ rule_file_path }}"
+  vars:
+    accept_rules:
+      - "tcp dport { http, https, 8443, 8080 }"
