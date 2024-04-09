@@ -8,7 +8,7 @@
 
 - name: set install location for this firewall rule
   set_fact:
-    rule_file_path: "/etc/nftables/{{ policy_name }}/role_{{ item }}.yml"
+    rule_file_path: "/etc/nftables/{{ policy_name }}/role_{{ item }}.nft"
 
 - block: 
   - name: include firewall rules for {{ item }}
