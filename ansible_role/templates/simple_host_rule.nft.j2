@@ -1,0 +1,10 @@
+## create chain and counter for this rule 
+create chain inet {{policy_name}} {{rule_name}} 
+add counter inet {{policy_name}} {{rule_name}}
+
+## rule logic here
+add rule inet {{policy_name}} {{rule_name}} tcp dport 22 ip saddr $admin_hosts counter name {{rule_name}} accept 
+add rule inet {{policy_name}} {{rule_name}} tcp dport 22 ip saddr $user_hosts counter name {{rule_name}} accept
+
+## this bit tells the policy to actually use all of the above 
+add rule inet {{policy_name}} included_rules jump {{rule_name}}
