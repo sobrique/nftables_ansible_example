@@ -1,0 +1,10 @@
+## create chain and counter for this rule 
+create chain inet my_firewall_policy_name drop_nolog 
+add counter inet oxam_ansible drop_nolog
+
+## rule logic here
+add rule inet my_firewall_policy_name drop_nolog ip daddr 224.0.0.0/8 counter name drop_nolog drop 
+add rule inet my_firewall_policy_name drop_nolog ip daddr 255.255.255.255 counter name drop_nolog drop
+
+## this bit tells the policy to actually use all of the above 
+add rule inet my_firewall_policy_name drop_rules jump drop_nolog
