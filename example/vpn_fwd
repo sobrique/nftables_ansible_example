@@ -1,0 +1,92 @@
+## Define macros for this config
+define vpnmonitors = {
+     10.11.22.33, # monitor-A
+     10.12.13.14, # monitor-B
+}
+
+define vpn_ssh = {
+  10.13.14.15, # admin login via ssh
+}
+
+define video_conf = {
+  10.14.15.16, # video_conf_A
+  10.16.17.18, # video_conf_B
+}
+
+define other_application_example = {
+  10.18.19.20, #exampleA
+  10.19.20.21, #exampleB
+}
+
+define vpn_pool = 192.168.4.0/25
+
+define internal_int = ens3
+define external_int = ens4
+
+## create chain and counter for this rule
+create chain inet my_firewall_policy_name vpnhost
+add counter inet my_firewall_policy_name vpn_conn
+add counter inet my_firewall_policy_name vpn_mgmt_conn
+add counter inet my_firewall_policy_name vpn_ssh_conn
+
+# This is what we permit from external:
+add rule inet my_firewall_policy_name vpnhost udp dport 1194 counter name "vpn_conn" log prefix "VPN_ACCEPT:" accept
+
+#EVERYTHING ELSE on the external interface gets dropped if not already passed (will include icmp though):
+add rule inet my_firewall_policy_name vpnhost iifname $external_int log prefix "NFT_EXT_DROP" drop 
+add rule inet my_firewall_policy_name vpnhost tcp dport 5555 counter name "vpn_mgmt_conn" accept
+add rule inet my_firewall_policy_name vpnhost tcp dport 22 ip saddr $vpn_ssh counter name "vpn_ssh_conn" accept
+
+## this bit tells the policy to actually use all of the above
+add rule inet my_firewall_policy_name included_rules jump vpnhost
+
+
+### This bit does vpn forwarding access. Rules here are NOT inspected by the 'INPUT' filter. 
+create chain inet my_firewall_policy_name FORWARD { type filter hook forward priority 0; policy drop; }
+
+add counter inet my_firewall_policy_name nx_client_fwd
+add counter inet my_firewall_policy_name rdp_client_fwd
+add counter inet my_firewall_policy_name other_client_fwd
+add counter inet my_firewall_policy_name video_conf_client_fwd
+add counter inet my_firewall_policy_name established_fwd_conn
+
+add rule inet my_firewall_policy_name FORWARD ct state established counter name "established_fwd_conn" accept
+
+## Nomachine access - admin desktops on port 4000
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $all_nx_hosts tcp dport 4000 counter name nx_client_fwd accept
+
+## RDP access - windows desktops on 3389
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $win_hosts tcp dport 3389 counter name rdp_client_fwd accept
+
+##  video conf
+##TCP stuff for driving it
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $video_conf tcp dport { 80, 443, 4445 }  counter name video_conf_fwd accept
+
+## UDP stuff for video streaming
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $video_conf udp dport 10000-20000 counter name video_conf_fwd accept
+
+# OTHER client
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $other_application_example tcp dport { 5222, 5601, 8443, 25000-29999 }  counter name other_application_fwd accept
+## UDP stuff 
+add rule inet my_firewall_policy_name FORWARD iifname tun0 oifname $internal_int ip saddr $vpn_pool ip daddr $other_application_example udp dport 36002-59999 counter name other_application_fwd accept
+ 
+
+## This rule logs anything that doesn't match. But the 'policy' should be drop, so without it it should just be 'silent drop' instead.
+add rule inet my_firewall_policy_name FORWARD log prefix "NFT_FWD_DROP: " drop
+
+
+## And now we add the 'OUTBOUND' permitted/rejected traffic:
+## note: Stuff permitted by 'INPUT' won't necessarily also be permitted out again, like ICMP.
+create chain inet my_firewall_policy_name OUTPUT { type filter hook output priority 0; policy drop; }
+
+
+# Note too: Anything that 'FORWARD' handled will NOT be applied here, so no 'tun0' config stuff is/should be relevant. 
+
+# This should only permit 'reply' traffic to things that have passed rules elsewhere.
+add rule inet my_firewall_policy_name OUTPUT ct state established accept
+
+#ICMP we permit out of the internal facing interfaces, but not external.
+add rule inet my_firewall_policy_name OUTPUT oifname { $internal_int, tun0 } meta l4proto icmp accept
+add rule inet my_firewall_policy_name OUTPUT oifname $internal_int accept #stuff from host to internal network. 
+
+add rule inet my_firewall_policy_name OUTPUT log prefix "NFT_OUT_REJECT: " reject with icmpx type port-unreachable
